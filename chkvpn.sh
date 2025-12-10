@@ -28,7 +28,8 @@ Force=False
 Skip=False
 HeadLess=True
 DelAll=False
-
+Verbose=False
+CheckOnly=False
 def LoginSetting(driver):
 	WebDriverWait(driver,5).until(EC.presence_of_all_elements_located)
 	pas=driver.find_element(By.NAME,'luci_password')
@@ -58,14 +59,17 @@ def DelRouteAll(driver):
 		tbl=driver.find_element(By.XPATH,'//*[@id="route_tbl"]/table')
 		trs= tbl.find_elements(By.TAG_NAME,'tr')
 		n=len(trs)
-		print("del cnt:%d"%n,file=sys.stderr)
+		if Verbose:
+			print("del cnt:%d"%n,file=sys.stderr)
 		if n==1:
 			break
 		DelRoute(driver,trs[n-1])
-	print("Delete Done",file=sys.stderr)
+	if Verbose:
+		print("Delete Done",file=sys.stderr)
 	a=driver.find_element(By.ID,'commit_head')
 	a.click()
-	print("Saved",file=sys.stderr)
+	if Verbose:
+		print("Saved",file=sys.stderr)
 	driver.refresh()
 def GetAMG(driver,tr):
 	tds=tr.find_elements(By.TAG_NAME,'td')
@@ -114,7 +118,8 @@ def chgList(arg):
 	adr=[]
 	old=[]
 	t=subprocess.check_output(arg,shell=True).decode().split('\n')
-	print("arg:%s %d lines"%(arg,len(t)),file=sys.stderr)
+	if Verbose:
+		print("arg:%s %d lines"%(arg,len(t)),file=sys.stderr)
 	cnt=0
 	for s in t:
 		cnt+=1
@@ -123,7 +128,8 @@ def chgList(arg):
 				if keep==False and old!=adr:
 					ret+=1
 				servers.append((server,adr,gw,None if keep else old))
-				print("Server:%s append mode:%s"%(server,"norm" if keep is False else "keep"),file=sys.stderr)
+				if Verbose:
+					print("Server:%s append mode:%s"%(server,"norm" if keep is False else "keep"),file=sys.stderr)
 			adr=[]
 			old=[]
 			gw=None
@@ -134,20 +140,23 @@ def chgList(arg):
 				if keep==False and old!=adr:
 					ret+=1
 				servers.append((server,adr,gw,None if keep else old))
-				print("Server:%s append mode:%s"%(server,"norm" if keep is False else "keep"),file=sys.stderr)
+				if Verbose:
+					print("Server:%s append mode:%s"%(server,"norm" if keep is False else "keep"),file=sys.stderr)
 			adr=[]
 			old=[]
 			gw=None
 			keep=False
 			server=s[2:].strip()
 			n=subprocess.check_output("dig %s"%(server),shell=True).decode().split('\n')
-			print("dig:%s %d lines"%(server,len(n)),file=sys.stderr)
+			if Verbose:
+				print("dig:%s %d lines"%(server,len(n)),file=sys.stderr)
 			for l in n:
 				if l[0:1]!=';':
 					f=l.split()
 					if len(f)==5 and f[3]=='A' and f[2]=='IN' :
 						AddList(adr,"%s/32"%f[4])
-						print("adr:%s append norm"%f[4],file=sys.stderr)
+						if Verbose:
+							print("adr:%s append norm"%f[4],file=sys.stderr)
 		else:
 			r=s.split()
 			if len(r)>4 and r[0]=='route' :
@@ -155,19 +164,24 @@ def chgList(arg):
 					gw=r[4]
 				if keep:
 					AddList(adr,"%s/32"%r[2])
-					print("adr:%s append keep"%r[2],file=sys.stderr)
+					if Verbose:
+						print("adr:%s append keep"%r[2],file=sys.stderr)
 				else:
 					AddList(old,"%s/32"%r[2])
-					print("old:%s append"%r[2],file=sys.stderr)
-		print("%d processed :%s"%(cnt,s),file=sys.stderr)
+					if Verbose:
+						print("old:%s append"%r[2],file=sys.stderr)
+		if Verbose:
+			print("%d processed :%s"%(cnt,s),file=sys.stderr)
 	if server!=None and len(adr)>0:
 		if keep==False and old!=adr:
 			ret+=1
 		servers.append((server,adr,gw,None if keep else old))
-		print("Server:%s append mode:%s"%(server,"norm" if keep is False else "keep"),file=sys.stderr)
+		if Verbose:
+			print("Server:%s append mode:%s"%(server,"norm" if keep is False else "keep"),file=sys.stderr)
+	return ret
 ###############################################################################
 try:
-	opts,args = getopt.getopt( sys.argv[1:], "fsgd", ["force","skiproute","gui","delall"] )
+	opts,args = getopt.getopt( sys.argv[1:], "fsgdcv", ["force","skiproute","gui","delall"] )
 except getopt.GetoptError as err:
 	print(str(err))
 	sys.exit(2)
@@ -181,9 +195,28 @@ for o,a in opts:
 			HeadLess=False
 		case "-d" | "--delall":
 			DelAll=True
+		case "-c" | "--check":
+			CheckOnly=True
+		case "-v" | "--verbose":
+			Verbose=True
 chg=chgList('ssh root@%s cat %s'%(myip,up_list))
-if not Force and not chg:
+if not Force and chg==0:
 	print("Same Setting",file=sys.stderr)
+	sys.exit(0)
+if CheckOnly:
+	print("%s differ Setting"%chg,file=sys.stderr)
+	for s,aa,g,o in servers:
+		sd=0
+		if o!=None and aa!=o:
+			if sd==0:
+				print("server:%s"%s,file=sys.stderr)
+				sd=1
+			for a in aa:
+				if not a in o:
+					print(" new:%s"%a,file=sys.stderr)
+			for oo in o:
+				if not oo in aa:
+					print(" del:%s"%oo,file=sys.stderr)
 	sys.exit(1)
 dir=tempfile.mkdtemp()
 fu=open("%s/up.d"%dir,mode='w')
@@ -202,7 +235,8 @@ for s,aa,g,o in servers:
 		adrs.append("%s/%s"%(a,myip))
 		u.append('route add %s gw %s\n'%(a.split('/')[0],g))
 		d.append('route del %s gw %s\n'%(a.split('/')[0],g))
-print("adrs:%d address reading tempdir:%s"%(len(adrs),dir))
+if Verbose:
+	print("adrs:%d address reading tempdir:%s"%(len(adrs),dir))
 adrs.append('192.168.2.0/24/192.168.3.5')
 up_out.extend(u)
 dn_out.extend(d)
@@ -266,8 +300,11 @@ else:
 	while src<top:
 		if dst<len(trs):
 			driver.implicitly_wait( 2 )
+			chg=0
 			while GetAMG(driver,trs[dst])!=adrs[src]:
-				print("%d,%d:%s!=%s"%(dst,src,GetAMG(driver,trs[dst]),adrs[src]),file=sys.stderr)
+				chg=1
+				if Verbose:
+					print("%d,%d:%s!=%s"%(dst,src,GetAMG(driver,trs[dst]),adrs[src]),file=sys.stderr)
 				a=trs[dst].find_element(By.XPATH,'//*[@id="%s"]/td[4]/p[1]/a'%trs[dst].get_attribute('id'))
 				driver.implicitly_wait( 2 )
 				a.click()
@@ -280,7 +317,8 @@ else:
 				WebDriverWait(driver,5).until(EC.presence_of_all_elements_located)
 				tbl=driver.find_element(By.XPATH,'//*[@id="route_tbl"]/table')
 				trs= tbl.find_elements(By.TAG_NAME,'tr')[1:]
-			print("%d,%d:%s==%s"%(dst,src,GetAMG(driver,trs[dst]),adrs[src]),file=sys.stderr)
+			if Verbose and chg==0:
+				print("%d,%d:%s==%s"%(dst,src,GetAMG(driver,trs[dst]),adrs[src]),file=sys.stderr)
 			src+=1
 		else:
 			while len(trs)<(dst+1):
