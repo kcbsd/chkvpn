@@ -1,6 +1,6 @@
 #!/bin/python3
 # -*- codiong: utf-8 -*-
-# Ver 0.9
+# Ver 0.91
 import sys
 import os
 from selenium.webdriver import Chrome,ChromeOptions
@@ -30,6 +30,7 @@ HeadLess=True
 DelAll=False
 Verbose=False
 CheckOnly=False
+EraseOnly=False
 def LoginSetting(driver):
 	WebDriverWait(driver,5).until(EC.presence_of_all_elements_located)
 	pas=driver.find_element(By.NAME,'luci_password')
@@ -45,6 +46,12 @@ def RoutingSetting(driver):
 	route= driver.find_element(By.XPATH,'//*[@id="SPAccordionMenuTele"]/ul/li[3]/a')
 	route.click()
 	WebDriverWait(driver,10).until(EC.presence_of_all_elements_located)
+def SaveSetting(driver):
+	a=driver.find_element(By.ID,'commit_head')
+	a.click()
+def GetTableTR(driver):
+	tbl=driver.find_element(By.XPATH,'//*[@id="route_tbl"]/table')
+	return tbl.find_elements(By.TAG_NAME,'tr')[1:]
 def DelRoute(driver,tr):
 	id=tr.get_attribute('id')
 	a=tr.find_element(By.XPATH,'//*[@id="%s"]/td[4]/p[2]/a'%id)
@@ -55,19 +62,17 @@ def DelRoute(driver,tr):
 	driver.implicitly_wait( 2 )
 	driver.refresh()
 def DelRouteAll(driver):
-	while True:	
-		tbl=driver.find_element(By.XPATH,'//*[@id="route_tbl"]/table')
-		trs= tbl.find_elements(By.TAG_NAME,'tr')
+	while True:
+		trs=GetTableTR(driver)
 		n=len(trs)
 		if Verbose:
 			print("del cnt:%d"%n,file=sys.stderr)
-		if n==1:
+		if n==0:
 			break
 		DelRoute(driver,trs[n-1])
 	if Verbose:
 		print("Delete Done",file=sys.stderr)
-	a=driver.find_element(By.ID,'commit_head')
-	a.click()
+	SaveSetting(driver)
 	if Verbose:
 		print("Saved",file=sys.stderr)
 	driver.refresh()
@@ -75,6 +80,11 @@ def GetAMG(driver,tr):
 	tds=tr.find_elements(By.TAG_NAME,'td')
 	s='%s/%s'%(tds[0].text,tds[1].text)
 	return s
+def ReturnRouteList(driver):
+	d=driver.find_element(By.ID,"breadCrum")
+	a=d.find_elements(By.TAG_NAME,'a')
+	driver.get(a[2].get_attribute('href'))
+	driver.implicitly_wait(1)
 def SetRoute(driver,amg):
 	WebDriverWait(driver,10).until(EC.presence_of_all_elements_located)
 	t=amg.split('/')
@@ -92,14 +102,25 @@ def SetRoute(driver,amg):
 	alert=driver.switch_to.alert
 	alert.accept()
 	WebDriverWait(driver,120).until(EC.presence_of_element_located((By.ID, "resultMsg")))
+	driver.implicitly_wait( 1 ) 
+	p=driver.find_elements(By.CLASS_NAME,"okMessage")
+	ReturnRouteList(driver)
 	driver.refresh()
-	driver.implicitly_wait(1)
-def EditlRoute(driver,tr,amg):
+	driver.implicitly_wait( 2 ) 
+	return True
+def EditRoute(driver,tr,amg):
 	id=tr.get_attribute('id')
 	a=tr.find_element(By.XPATH,'//*[@id="%s"]/td[4]/p[1]/a'%id)
 	a.click()
 	WebDriverWait(driver,10).until(EC.presence_of_all_elements_located)
 	SetRoute(driver,amg)
+def AddRoute(driver,amg):
+	b=driver.find_element(By.ID,'addBtn')
+	b.click()
+	SetRoute(driver,amg)
+def Logout(driver):
+	b=driver.find_element(By.ID,'logout_head')
+	b.click()
 def AddList(d,s):
 	cnt=0
 	while cnt<len(d):
@@ -109,6 +130,28 @@ def AddList(d,s):
 		cnt+=1
 	if cnt==len(d):		
 		d.append(s)
+def flushRoute(keep,server,adr,gw,old):
+	global servers
+	ret=0
+	if keep and len(adr)>0 and len(old)>0 and server!=None:
+		c=len(adr)
+		for a in adr:
+			if not a in old:
+				print("address %s not found in old list:%s"%(a,server),file=sys.stderr)
+			else:
+				c-=1
+		if c>0:
+			sys.exit(3)
+		servers.append((server,old,gw,None))
+		if Verbose:
+			print("Server:%s append mode:%s"%(server,"keep"),file=sys.stderr)
+	elif not keep and len(adr)>0 and server!=None:
+		if old!=adr:
+			ret=1
+		servers.append((server,adr,gw,old))
+		if Verbose:
+			print("Server:%s append mode:%s"%(server,"norm" ),file=sys.stderr)
+	return ret
 def chgList(arg):
 	global servers
 	ret=0
@@ -123,29 +166,12 @@ def chgList(arg):
 	cnt=0
 	for s in t:
 		cnt+=1
-		if s.strip()[0:2] == '##':
-			if server!=None and len(adr)>0:
-				if keep==False and old!=adr:
-					ret+=1
-				servers.append((server,adr,gw,None if keep else old))
-				if Verbose:
-					print("Server:%s append mode:%s"%(server,"norm" if keep is False else "keep"),file=sys.stderr)
+		if s.strip()[0:2] == '##' or s.strip()[0:2] == '# ':
+			ret+=flushRoute(keep,server,adr,gw,old)
+			keep=True if s.strip()[0:2] == '##' else False
+			gw=None
 			adr=[]
 			old=[]
-			gw=None
-			keep=True
-			server=s[2:].strip()
-		elif s.strip()[0:2] == '# ':
-			if server!=None and len(adr)>0:
-				if keep==False and old!=adr:
-					ret+=1
-				servers.append((server,adr,gw,None if keep else old))
-				if Verbose:
-					print("Server:%s append mode:%s"%(server,"norm" if keep is False else "keep"),file=sys.stderr)
-			adr=[]
-			old=[]
-			gw=None
-			keep=False
 			server=s[2:].strip()
 			n=subprocess.check_output("dig %s"%(server),shell=True).decode().split('\n')
 			if Verbose:
@@ -162,26 +188,27 @@ def chgList(arg):
 			if len(r)>4 and r[0]=='route' :
 				if gw==None:
 					gw=r[4]
-				if keep:
-					AddList(adr,"%s/32"%r[2])
-					if Verbose:
-						print("adr:%s append keep"%r[2],file=sys.stderr)
-				else:
-					AddList(old,"%s/32"%r[2])
-					if Verbose:
-						print("old:%s append"%r[2],file=sys.stderr)
+				AddList(old,"%s/32"%r[2])
+				if Verbose:
+					print("old:%s append"%r[2],file=sys.stderr)
 		if Verbose:
 			print("%d processed :%s"%(cnt,s),file=sys.stderr)
 	if server!=None and len(adr)>0:
-		if keep==False and old!=adr:
-			ret+=1
-		servers.append((server,adr,gw,None if keep else old))
-		if Verbose:
-			print("Server:%s append mode:%s"%(server,"norm" if keep is False else "keep"),file=sys.stderr)
+		ret+=flushRoute(keep,server,adr,gw,old)
 	return ret
+def CheckDuplicate(driver,trs,adrs):
+	i=0
+	while i<len(adrs):
+		j=i+1
+		while j<len(trs):
+			if GetAMG(driver,trs[j])==adrs[i]:
+				return True
+			j+=1
+		i+=1
+	return False
 ###############################################################################
 try:
-	opts,args = getopt.getopt( sys.argv[1:], "fsgdcv", ["force","skiproute","gui","delall"] )
+	opts,args = getopt.getopt( sys.argv[1:], "fsgdcve", ["force","skiproute","gui","delall","erase"] )
 except getopt.GetoptError as err:
 	print(str(err))
 	sys.exit(2)
@@ -199,24 +226,26 @@ for o,a in opts:
 			CheckOnly=True
 		case "-v" | "--verbose":
 			Verbose=True
+		case "-e" | "--erase":
+			EraseOnly=True
 chg=chgList('ssh root@%s cat %s'%(myip,up_list))
-if not Force and chg==0:
+if not Force and not EraseOnly and chg==0:
 	print("Same Setting",file=sys.stderr)
 	sys.exit(0)
 if CheckOnly:
 	print("%s differ Setting"%chg,file=sys.stderr)
-	for s,aa,g,o in servers:
+	for s,aa,g,oo in servers:
 		sd=0
-		if o!=None and aa!=o:
+		if oo!=None and aa!=oo:
 			if sd==0:
 				print("server:%s"%s,file=sys.stderr)
 				sd=1
 			for a in aa:
-				if not a in o:
+				if not a in oo:
 					print(" new:%s"%a,file=sys.stderr)
-			for oo in o:
-				if not oo in aa:
-					print(" del:%s"%oo,file=sys.stderr)
+			for o in oo:
+				if not o in aa:
+					print(" del:%s"%o,file=sys.stderr)
 	sys.exit(1)
 dir=tempfile.mkdtemp()
 fu=open("%s/up.d"%dir,mode='w')
@@ -267,37 +296,14 @@ driver= Chrome(service=Service(drv_path),options=options)
 driver.get('http://192.168.3.1/cgi-bin/gui/default/system')
 LoginSetting(driver)
 RoutingSetting(driver)
-if DelAll:
-	DelRouteAll(driver)
-	# WebDriverWait(driver,120).until(EC.presence_of_all_elements_located)
-	cnt=0
-	for a in adrs:
-		cnt+=1
-		print("addr:%s cnt:%d"%(a,cnt),file=sys.stderr)
-		while True:
-			b=driver.find_element(By.ID,'addBtn')
-			b.click()
-			SetRoute(driver,a)
-			WebDriverWait(driver,5).until(EC.presence_of_all_elements_located)
-			driver.implicitly_wait( 1 ) 
-			b=driver.find_element(By.XPATH,'//*[@id="breadCrum"]/span[3]/a')
-			driver.implicitly_wait( 1 ) 
-			b.click()
-
-			WebDriverWait(driver,5).until(EC.presence_of_all_elements_located)
-			tbl=driver.find_element(By.XPATH,'//*[@id="route_tbl"]/table')
-			trs= tbl.find_elements(By.TAG_NAME,'tr')
-			n=len(trs)
-			print("add trs:%d"%n,file=sys.stderr)
-			if n==(cnt+1):
-				break
-else:
+lenAdrs=len(adrs)
+trs= GetTableTR(driver)
+if len(trs)>lenAdrs or CheckDuplicate(driver,trs,adrs):
+	DelAll=True
+if not DelAll and not EraseOnly:
 	src=0
 	dst=0
-	top=len(adrs)
-	tbl=driver.find_element(By.XPATH,'//*[@id="route_tbl"]/table')
-	trs= tbl.find_elements(By.TAG_NAME,'tr')[1:]
-	while src<top:
+	while not DelAll and src<lenAdrs:
 		if dst<len(trs):
 			driver.implicitly_wait( 2 )
 			chg=0
@@ -305,37 +311,39 @@ else:
 				chg=1
 				if Verbose:
 					print("%d,%d:%s!=%s"%(dst,src,GetAMG(driver,trs[dst]),adrs[src]),file=sys.stderr)
-				a=trs[dst].find_element(By.XPATH,'//*[@id="%s"]/td[4]/p[1]/a'%trs[dst].get_attribute('id'))
-				driver.implicitly_wait( 2 )
-				a.click()
-				driver.implicitly_wait( 2 )
-				SetRoute(driver,adrs[src])
-				b=driver.find_element(By.XPATH,'//*[@id="breadCrum"]/span[3]/a')
+				EditRoute(driver,trs[dst],adrs[src])
 				WebDriverWait(driver,5).until(EC.presence_of_all_elements_located)
-				driver.implicitly_wait( 2 )
-				b.click()
-				WebDriverWait(driver,5).until(EC.presence_of_all_elements_located)
-				tbl=driver.find_element(By.XPATH,'//*[@id="route_tbl"]/table')
-				trs= tbl.find_elements(By.TAG_NAME,'tr')[1:]
+				trs= GetTableTR(driver)
 			if Verbose and chg==0:
 				print("%d,%d:%s==%s"%(dst,src,GetAMG(driver,trs[dst]),adrs[src]),file=sys.stderr)
 			src+=1
 		else:
-			while len(trs)<(dst+1):
-				b=driver.find_element(By.ID,'addBtn')
-				b.click()
-				driver.implicitly_wait( 2 )
-				SetRoute(driver,adrs[src])
-	#			WebDriverWait(driver,120).until(EC.presence_of_element_located((By.XPATH,'//*[@id="breadCrum"]/span[3]/a')))
-				b=driver.find_element(By.XPATH,'//*[@id="breadCrum"]/span[3]/a')
-				b.click()
+			while len(trs)<dst:
+				AddRoute(driver,adrs[src])
 				WebDriverWait(driver,5).until(EC.presence_of_all_elements_located)
-				tbl=driver.find_element(By.XPATH,'//*[@id="route_tbl"]/table')
-				trs= tbl.find_elements(By.TAG_NAME,'tr')[1:]
+				trs= GetTableTR(driver)
 		dst+=1
-a=driver.find_element(By.ID,'commit_head')
-a.click()
-b=driver.find_element(By.ID,'logout_head')
-b.click()
+if DelAll or EraseOnly:
+	DelRouteAll(driver)
+	if EraseOnly:
+		b=driver.find_element(By.ID,'logout_head')
+		b.click()
+		driver.quit()
+		sys.exit(0)
+	# WebDriverWait(driver,120).until(EC.presence_of_all_elements_located)
+	cnt=0
+	for a in adrs:
+		cnt+=1
+		print("addr:%s cnt:%d"%(a,cnt),file=sys.stderr)
+		while True:
+			AddRoute(driver,a)
+			WebDriverWait(driver,5).until(EC.presence_of_all_elements_located)
+			trs= GetTableTR(driver)
+			n=len(trs)
+			print("add trs:%d"%n,file=sys.stderr)
+			if n==cnt:
+				break
+SaveSetting(driver)
+Logout(driver)
 driver.quit()
 sys.exit(0)
