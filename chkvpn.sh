@@ -1,6 +1,6 @@
 #!/bin/python3
 # -*- codiong: utf-8 -*-
-# Ver 0.92
+# Ver 0.93
 import sys
 import os
 from selenium.webdriver import Chrome,ChromeOptions
@@ -18,7 +18,7 @@ import getopt
 import datetime
 import tempfile
 import shutil
-myip='192.168.3.8'
+gw_ip='192.168.3.8'
 up_list='/etc/ppp/ip-up.d/0001vesca'
 dn_list='/etc/ppp/ip-down.d/0001vesca'
 up_out=['#!/bin/sh\n','systemctl start nftables\n']
@@ -228,7 +228,7 @@ for o,a in opts:
 			Verbose=True
 		case "-e" | "--erase":
 			EraseOnly=True
-chg=chgList('ssh root@%s cat %s'%(myip,up_list))
+chg=chgList('ssh root@%s cat %s'%(gw_ip,up_list))
 if not Force and not EraseOnly and chg==0:
 	print("Same Setting",file=sys.stderr)
 	sys.exit(0)
@@ -261,7 +261,7 @@ for s,aa,g,o in servers:
 		d.append('# %s\n'%s)
 		u.append('# %s\n'%s)
 	for a in aa:
-		adrs.append("%s/%s"%(a,myip))
+		adrs.append("%s/%s"%(a,gw_ip))
 		u.append('route add %s gw %s\n'%(a.split('/')[0],g))
 		d.append('route del %s gw %s\n'%(a.split('/')[0],g))
 if Verbose:
@@ -277,10 +277,10 @@ fu.writelines(up_out)
 fd.writelines(dn_out)
 fu.close()
 fd.close()
-subprocess.run(["scp", 'root@%s:%s'%(myip,up_list),'%s.bak'%os.path.basename(up_list)])
-subprocess.run(["scp",'%s/up.d'%dir,'root@%s:%s'%(myip,up_list)])
-subprocess.run(["ssh",'root@%s'%myip,'systemctl','restart','xl2tpd'])
-subprocess.run(["scp",'%s/dn.d'%dir,'root@%s:%s'%(myip,dn_list)])
+subprocess.run(["scp", 'root@%s:%s'%(gw_ip,up_list),'%s.bak'%os.path.basename(up_list)])
+subprocess.run(["scp",'%s/up.d'%dir,'root@%s:%s'%(gw_ip,up_list)])
+subprocess.run(["ssh",'root@%s'%gw_ip,'systemctl','restart','xl2tpd'])
+subprocess.run(["scp",'%s/dn.d'%dir,'root@%s:%s'%(gw_ip,dn_list)])
 shutil.rmtree(dir)
 if Skip:
 	sys.exit(0)
