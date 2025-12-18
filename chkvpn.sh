@@ -1,6 +1,6 @@
 #!/bin/python3
 # -*- codiong: utf-8 -*-
-# Ver 0.91
+# Ver 0.92
 import sys
 import os
 from selenium.webdriver import Chrome,ChromeOptions
@@ -289,9 +289,11 @@ options= ChromeOptions()
 if HeadLess:
 	options.add_argument('--headless')
 	options.add_argument('--window-size=1920,1080')
-drv_path='/usr/bin/chromedriver'
-#drv_path='/bin/chromedriver'
-#options.binary_location='/opt/google/chrome/chrome'
+if os.environ['OSTYPE']=='FreeBSD':
+	drv_path='/usr/local/bin/chromedriver'
+	options.binary_location='/usr/local/bin/chrome'
+else:
+	drv_path='/usr/bin/chromedriver'
 driver= Chrome(service=Service(drv_path),options=options)
 driver.get('http://192.168.3.1/cgi-bin/gui/default/system')
 LoginSetting(driver)
